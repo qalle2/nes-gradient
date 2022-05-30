@@ -8,7 +8,7 @@ Table of contents:
 * [Technical info](#technical-info)
 
 ## List of files
-* `gradient.asm`: source code (assembles with [ASM6](https://github.com/qalle2/asm6))
+* `gradient.asm`: source code (assembles with [ASM6](https://www.romhacking.net/utilities/674/))
 * `gradient.nes.gz`: assembled program (iNES format, gzip compressed)
 * `assemble.sh`: a Linux script that assembles the program (warning: deletes files)
 * `hexdump.py`: creates `hexdump.txt`
