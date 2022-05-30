@@ -13,6 +13,7 @@ Table of contents:
 * `assemble.sh`: a Linux script that assembles the program (warning: deletes files)
 * `hexdump.py`: creates `hexdump.txt`
 * `hexdump.txt`: assembled program in hexadecimal
+* `sin-gen.py`: generates a sine table
 * `snap.png`: screenshot
 
 ## Technical info

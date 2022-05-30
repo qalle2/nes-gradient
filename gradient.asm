@@ -3,17 +3,15 @@
 ; --- Constants -----------------------------------------------------------------------------------
 
 ; RAM
-; note: on the OAM page, attribute bytes of unused sprites ($x2/$x6/$xa/$xe) are used for other
-; variables too
-sprite_data     equ $00    ; OAM page ($100 bytes)
-color_counter   equ $c2    ; color counter
-text_counter    equ $c6    ; text counter
-direction       equ $ca    ; direction of color animation: 0=inwards, 1=outwards
-ppu_ctrl_copy   equ $ce    ; copy of ppu_ctrl
-run_main_loop   equ $d2    ; is main loop allowed to run? (MSB: 0=no, 1=yes)
-pal_src_index   equ $d6    ; start index in ROM palette (0-112 in steps of 16)
-temp            equ $da
+color_counter   equ $00    ; color counter
+text_counter    equ $01    ; text counter
+direction       equ $02    ; direction of color animation: 0=inwards, 1=outwards
+ppu_ctrl_copy   equ $03    ; copy of ppu_ctrl
+run_main_loop   equ $04    ; is main loop allowed to run? (MSB: 0=no, 1=yes)
+pal_src_index   equ $05    ; start index in ROM palette (0-112 in steps of 16)
+temp            equ $06    ; temporary
 sine_table      equ $0200  ; $100 bytes
+sprite_data     equ $0300  ; OAM page ($100 bytes)
 
 ; memory-mapped registers
 ppu_ctrl        equ $2000
@@ -59,6 +57,7 @@ spr_center_y    equ (128-8-4-1)  ; Y position around which sprites revolve
                 pad $fc00, $ff          ; last 1 KiB of CPU memory space
 
 reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/Init_code
+                ;
                 sei                     ; ignore IRQs
                 cld                     ; disable decimal mode
                 ldx #%01000000
@@ -73,29 +72,35 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
 
                 jsr wait_vbl_start      ; wait for start of VBlank
 
-                ldy #$ff                ; sprite page: set Y positions to $ff (to hide sprites)
-                lda #$00                ; and attributes to $00 (also clears other variables)
+                lda #$00                ; clear zero page and sprite page
                 tax
--               sty sprite_data+0,x
-                sta sprite_data+2,x
+-               sta $00,x
+                sta sprite_data,x
+                inx
+                bne -
+
+                lda #$ff                ; set Y positions of sprites to $ff to hide sprites
+                ldx #0
+-               sta sprite_data,x
                 inx
                 inx
                 inx
                 inx
                 bne -
 
-                ldy #(spr_tiles_end-spr_tiles-1)
--               tya                     ; copy sprite tiles (Y/X = source/destination index;
-                asl a                   ; 6502 has LDA absolute,y and STA zp,x but no STA zp,y)
+                ldx #(spr_tiles_end-spr_tiles-1)
+-               txa                     ; copy sprite tiles (X/Y = source/destination index)
                 asl a
-                tax
-                lda spr_tiles,y
-                sta sprite_data+1,x
-                dey
+                asl a
+                tay
+                lda spr_tiles,x
+                sta sprite_data+1,y
+                dex
                 bpl -
 
                 ; generate first 64 bytes (90 degrees) of sine table in RAM from 16 bytes
                 ; (64*2 bits) of delta-coded data
+                ;
                 lda #spr_center_x       ; initial sine (will be overwritten later)
                 sta sine_table+$ff
                 ldx #(16-1)             ; X = sine_deltas index / inner loop counter
@@ -239,7 +244,8 @@ wait_vbl_start  bit ppu_status          ; wait for start of VBlank
 sine_deltas     ; 16-byte sine table for sprite coordinates:
                 ; 64 unsigned 2-bit delta values for angles < 90 degrees, amplitude 100
                 ; first delta = 2 MSBs of last byte, last delta = 2 LSBs of first byte
-                ; generated with gradient-sin-gen.py
+                ; generated with sin-gen.py
+                ;
                 db 1<<6 | 0<<4 | 0<<2 | 0
                 db 0<<6 | 1<<4 | 0<<2 | 0
                 db 1<<6 | 0<<4 | 1<<2 | 1
@@ -278,42 +284,44 @@ write2_pt_bytes ; in: A = byte from pt_data_2bit/pt_data_1bit;
                 rts
 
                 ; pattern table data (each nybble is an index to pt_data_bytes)
+                ;
 pt_data_2bit    ; 2-bit tiles (16 nybbles = 1 tile)
-                hex 99999999 00000000  ; tile $00: solid    color 1
-                hex 34343434 43434343  ; tile $01: dithered color 1/2
-                hex 00000000 99999999  ; tile $02: solid    color 2
-                hex 43434343 99999999  ; tile $03: dithered color 2/3
+                hex 99999999 00000000   ; tile $00: solid    color 1
+                hex 34343434 43434343   ; tile $01: dithered color 1/2
+                hex 00000000 99999999   ; tile $02: solid    color 2
+                hex 43434343 99999999   ; tile $03: dithered color 2/3
 pt_data_2bit_end
 pt_data_1bit    ; 1-bit tiles (8 nybbles = 1st bitplane of 1 tile; 2nd bitplane will be zeroed)
-                hex 96696666  ; tile $04: "A"
-                hex 55596699  ; tile $05: "B"
-                hex 11196699  ; tile $06: "D"
-                hex 95595599  ; tile $07: "E"
-                hex 95566699  ; tile $08: "G"
-                hex 22222222  ; tile $09: "I"/"1"
-                hex 55555599  ; tile $0a: "L"
-                hex 68976666  ; tile $0b: "M"
-                hex 96666666  ; tile $0c: "N"
-                hex 96666699  ; tile $0d: "O"/"0"
-                hex 96691111  ; tile $0e: "Q"/"9"
-                hex 95555555  ; tile $0f: "R"
-                hex 92222222  ; tile $10: "T"
-                hex 66699119  ; tile $11: "Y"
-                hex 91195599  ; tile $12: "Z"/"2"
-                hex 66691111  ; tile $13: "4"
+                hex 96696666            ; tile $04: "A"
+                hex 55596699            ; tile $05: "B"
+                hex 11196699            ; tile $06: "D"
+                hex 95595599            ; tile $07: "E"
+                hex 95566699            ; tile $08: "G"
+                hex 22222222            ; tile $09: "I"/"1"
+                hex 55555599            ; tile $0a: "L"
+                hex 68976666            ; tile $0b: "M"
+                hex 96666666            ; tile $0c: "N"
+                hex 96666699            ; tile $0d: "O"/"0"
+                hex 96691111            ; tile $0e: "Q"/"9"
+                hex 95555555            ; tile $0f: "R"
+                hex 92222222            ; tile $10: "T"
+                hex 66699119            ; tile $11: "Y"
+                hex 91195599            ; tile $12: "Z"/"2"
+                hex 66691111            ; tile $13: "4"
 pt_data_1bit_end
 
-pt_data_bytes   ; actual pattern table data bytes (all tiles consist of these bytes only)
-                db %00000000  ; index 0
-                db %00000011  ; index 1
-                db %00011000  ; index 2
-                db %01010101  ; index 3
-                db %10101010  ; index 4
-                db %11000000  ; index 5
-                db %11000011  ; index 6
-                db %11011011  ; index 7
-                db %11100111  ; index 8
-                db %11111111  ; index 9
+pt_data_bytes   ; actual pattern table data bytes
+                ;
+                db %00000000            ; index 0
+                db %00000011            ; index 1
+                db %00011000            ; index 2
+                db %01010101            ; index 3
+                db %10101010            ; index 4
+                db %11000000            ; index 5
+                db %11000011            ; index 6
+                db %11011011            ; index 7
+                db %11100111            ; index 8
+                db %11111111            ; index 9
 
 write_nt1_row   txa                     ; write X & %11 to VRAM 32 times
                 and #%00000011
@@ -390,6 +398,7 @@ main_loop       bit run_main_loop       ; wait until NMI routine has set flag
                 jmp main_loop           ; infinite loop
 
 spr_tiles       ; tiles of sprites (note: spaces are defined in angle_changes)
+                ;
                 hex 09 0d 12 13              ; "IOZ4"
                 hex 05 11 10 07              ; "BYTE"
                 hex 08 0f 04 06 09 07 0c 10  ; "GRADIENT"
@@ -399,6 +408,7 @@ spr_tiles       ; tiles of sprites (note: spaces are defined in angle_changes)
 spr_tiles_end
 
 angle_changes   ; what to subtract from (angle+64) after each letter
+                ;
                 db 64+7, 64+7, 64+7, 64+12
                 db 64+7, 64+7, 64+7, 64+12
                 db 64+7, 64+7, 64+7, 64+7, 64+7, 64+7, 64+7, 64+12
@@ -419,6 +429,7 @@ nmi             pha                     ; push A, X, Y
                 pha
 
                 bit ppu_status          ; reset ppu_scroll/ppu_addr latch
+
                 lda #$00                ; do OAM DMA
                 sta oam_addr
                 lda #>sprite_data
@@ -446,7 +457,7 @@ nmi             pha                     ; push A, X, Y
                 tax
                 pla
 
-irq             rti                     ; note: IRQ unused
+irq             rti                     ; IRQ unused
 
 palettes        ; eight 16-color sets of background palettes
                 db colbg,cl1,cl2,cl3, colbg,cl3,cl4,cl5, colbg,cl5,cl6,cl7, colbg,cl7,cl8,cl1
@@ -476,4 +487,4 @@ set_ppu_regs    lda #0
 ; --- Interrupt vectors ---------------------------------------------------------------------------
 
                 pad $fffa, $ff
-                dw nmi, reset, irq  ; note: IRQ unused
+                dw nmi, reset, irq      ; IRQ unused
